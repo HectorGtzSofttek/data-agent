@@ -1,8 +1,8 @@
 import os
 import json
-import asyncio
 from dotenv import load_dotenv
 from openai import AzureOpenAI
+from fastmcp import FastMCP
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 
@@ -80,49 +80,52 @@ def llm_to_message(azure: AzureOpenAI, deployment: str, question: str, rows_json
     )
     return resp.choices[0].message.content.strip()
 
-async def main():
+
+# --- MCP Server ---
+mcp = FastMCP(
+    name="AI Database Assistant",
+    instructions="Ask natural language questions about the database. Use ask_database to query and get answers.",
+)
+
+
+@mcp.tool
+async def ask_database(question: str) -> str:
+    """
+    Ask a natural language question about the database. Returns an answer in plain language plus the underlying data as JSON.
+    """
     azure = make_azure_client()
     deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
     if not deployment:
         raise ValueError("Missing AZURE_OPENAI_DEPLOYMENT_NAME in .env")
 
     client = make_mcp_client()
-
     async with client:
-        tools = await client.list_tools()
-        print("MCP tools:", [t.name for t in tools])
+        # 1) LLM → SQL (JSON-first)
+        sql = llm_to_sql(azure, deployment, question)
 
-        while True:
-            question = input("\nAsk something (or type 'exit'): ").strip()
-            if question.lower() == "exit":
-                break
+        # 2) MCP → execute SQL
+        result = await client.call_tool("execute_sql", {"sql": sql})
+        print("result: ", result)
+        raw_text = result.content[0].text
+        print("raw_text: ", raw_text)
 
-            # 1) LLM → SQL (JSON-first)
-            sql = llm_to_sql(azure, deployment, question)
-            print("\nSQL:\n", sql)
+        try:
+            parsed = json.loads(raw_text)
+            print("parsed: ", parsed)
+            if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict) and "rows" in parsed[0]:
+                rows = parsed[0]["rows"]
+            else:
+                rows = parsed
+        except Exception:
+            rows = raw_text
 
-            # 2) MCP → execute SQL
-            result = await client.call_tool("execute_sql", {"sql": sql})
+        rows_json = json.dumps(rows, ensure_ascii=False, indent=2) if not isinstance(rows, str) else rows
 
-            raw_text = result.content[0].text  
-            try:
-                parsed = json.loads(raw_text) 
-         
-                if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict) and "rows" in parsed[0]:
-                    rows = parsed[0]["rows"]
-                else:
-                    rows = parsed
-            except Exception:
-                rows = raw_text
+        # 3) LLM → natural language message
+        message = llm_to_message(azure, deployment, question, rows_json)
 
-            rows_json = json.dumps(rows, ensure_ascii=False, indent=2) if not isinstance(rows, str) else rows
+    return f"{message}\n\nData:\n{rows_json}"
 
-            # 3) LLM → natural language message
-            message = llm_to_message(azure, deployment, question, rows_json)
-
-            # 4) Output both (chat + data)
-            print("\nMessage:\n", message)
-            print("\nData (JSON):\n", rows_json)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    mcp.run()
