@@ -34,7 +34,7 @@ def build_database_uri() -> str:
 def make_mcp_client() -> Client:
     transport = StdioTransport(
         command="postgres-mcp",
-        args=["--access-mode=restricted", "--transport=stdio"],
+        args=["--access-mode=unrestricted", "--transport=stdio"],        
         env={"DATABASE_URI": build_database_uri()},
         keep_alive=True,
     )
