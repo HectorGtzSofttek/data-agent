@@ -12,14 +12,14 @@ from fastmcp.client.transports import StdioTransport
 
 load_dotenv()
 
-# Project root (where .env and ai_database_assistant.py live)
+# Project root (where .env and ai_database_assistant_spec.py live)
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 
 async def main():
     transport = StdioTransport(
         command="python",
-        args=["ai_database_assistant.py"],
+        args=["ai_database_assistant_spec.py"],
         cwd=PROJECT_ROOT,
         env={**os.environ},
         keep_alive=True,
